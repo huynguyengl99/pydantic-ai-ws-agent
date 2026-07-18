@@ -1,0 +1,33 @@
+[project]
+name = "pydantic-ai-ws-agent"
+version = "0.1.0"
+description = "Pydantic AI agent server with typed WebSockets (chanx + FastAPI): streaming, tool calls, and human-in-the-loop approvals"
+license = "MIT"
+authors = [{ name = "Huy Nguyen", email = "ndhgl99@gmail.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic-ai-slim[openai,anthropic]>=2.9",
+    "chanx[fast_channels]>=2.8.0",
+    "fast-channels[redis]>=1.0.3",
+    "aiosqlite>=0.20",
+    "uvicorn[standard]>=0.30",
+    "python-dotenv>=1.0",
+    "pydantic-settings>=2.14.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "mypy>=1.15.0",
+    "pyright[nodejs]>=1.1.400,<2",
+    "ruff>=0.12.12",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.uv]
+package = false

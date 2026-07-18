@@ -1,0 +1,12 @@
+src = ["."]
+target-version = "py311"
+
+[lint]
+ignore = [
+  "C901",  # Function is too complex
+  "E501",  # line too long, handled by the formatter
+]
+select = ["B", "C90", "E", "F", "I", "N", "Q", "UP", "W"]
+
+[lint.isort]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]

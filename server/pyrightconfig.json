@@ -1,0 +1,12 @@
+{
+    "include": ["app", "tests"],
+    "typeCheckingMode": "strict",
+    "reportUnusedFunction": "none",
+    "pythonVersion": "3.11",
+    "executionEnvironments": [
+        {
+            "root": "tests",
+            "extraPaths": ["."]
+        }
+    ]
+}
