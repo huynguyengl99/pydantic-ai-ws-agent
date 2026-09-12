@@ -5,6 +5,7 @@ assertions depend on what it felt like saying.
 """
 
 from collections.abc import AsyncIterator
+from typing import cast
 
 from pydantic_ai.messages import (
     ModelMessage,
@@ -22,6 +23,7 @@ from pydantic_ai.models.function import (
 
 from app.assistant.agent import build_agent
 from app.assistant.topic import TaskletTopic
+from app.db import TaskItem
 from app.main import app
 
 __all__ = ["app"]
@@ -49,12 +51,15 @@ def is_continuation(messages: list[ModelMessage]) -> bool:
     full of earlier responses, so asking whether any tool ever ran is always yes.
     """
     for message in reversed(messages):
-        if isinstance(message, ModelResponse):
-            return True
-        if isinstance(message, ModelRequest) and any(
-            isinstance(part, UserPromptPart) for part in message.parts
-        ):
-            return False
+        match message:
+            case ModelResponse():
+                return True
+            case ModelRequest(parts=parts) if any(
+                isinstance(part, UserPromptPart) for part in parts
+            ):
+                return False
+            case _:
+                pass
     return False
 
 
@@ -64,16 +69,11 @@ def listed_task_ids(messages: list[ModelMessage]) -> list[int]:
         match message:
             case ModelRequest(parts=parts):
                 for part in parts:
-                    if (
-                        isinstance(part, ToolReturnPart)
-                        and part.tool_name == "list_tasks"
-                    ):
-                        content = part.content
-                        if isinstance(content, list):
-                            return [
-                                item["id"] if isinstance(item, dict) else item.id
-                                for item in content
-                            ]
+                    match part:
+                        case ToolReturnPart(tool_name="list_tasks", content=content):
+                            return [task.id for task in cast(list[TaskItem], content)]
+                        case _:
+                            pass
             case _:
                 pass
     return []

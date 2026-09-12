@@ -19,11 +19,11 @@ export function HelpModal({ server, conversation, onClose }: Props) {
           </button>
         </div>
         <p>
-          Tasklet is a demo of a <strong>Pydantic AI</strong> agent served over{" "}
-          <strong>typed WebSockets</strong> (FastAPI + chanx). The agent manages
-          the task list on the right; everything you see — streaming text, tool
-          calls, approvals — is a typed message defined by the server&apos;s
-          AsyncAPI contract.
+          Tasklet is a demo of a <strong>Pydantic AI</strong> agent served over
+          the <strong>AG-UI protocol</strong> on a WebSocket (FastAPI + chanx).
+          The agent manages the task list on the right; everything you see —
+          streaming text, tool calls, approvals, the task list itself — arrives
+          as a standard AG-UI event, not a contract invented for this app.
         </p>
 
         <h3>Try this flow</h3>
@@ -84,7 +84,7 @@ export function HelpModal({ server, conversation, onClose }: Props) {
             Source + guide
           </a>
           <a
-            href="https://pydantic.dev/docs/ai/"
+            href="https://ai.pydantic.dev"
             target="_blank"
             rel="noreferrer"
           >

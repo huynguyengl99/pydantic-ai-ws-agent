@@ -1,173 +1,139 @@
 # Architecture
 
-How a prompt becomes a stream of typed WebSocket messages, and how a destructive
-tool call pauses for human approval.
+How a prompt becomes a stream of AG-UI events, and how a destructive tool call pauses
+for human approval without a protocol of our own.
 
 ```mermaid
 flowchart TD
-    Client["React client (tabs, devices)<br/>types generated from AsyncAPI"]
+    Client["React client (tabs, devices)<br/>types from @ag-ui/core"]
     Consumer["chanx AgentConsumer<br/>one per connection"]
-    Harness["AgentHarness<br/>background run per turn"]
-    Agent["pydantic-ai Agent<br/>TextAnswer output, deferred tools"]
-    DB[("SQLite<br/>tasks, history, titles, chips")]
-    Group(["conversation.{id} group<br/>channel layer: in-memory / Redis"])
+    Topic["TaskletTopic<br/>agui:thread:{conversation}"]
+    Adapter["pydantic-ai AGUIAdapter<br/>run events as AG-UI"]
+    Agent["pydantic-ai Agent<br/>approval-gated tools"]
+    DB[("SQLite<br/>tasks, transcript, titles")]
+    Group(["thread group<br/>channel layer: in-memory / Redis"])
     HTTP["REST<br/>/conversations, /notify"]
 
-    Client -->|"chat, tool_decision"| Consumer
+    Client -->|"subscribe, ag_ui_run"| Consumer
     Client -.->|fetch| HTTP
-    Consumer -->|spawns| Harness
-    Harness <-->|run_stream| Agent
+    Consumer --> Topic
+    Topic <-->|run_stream| Adapter
+    Adapter <--> Agent
     Agent -->|tools| DB
-    Harness -->|persist| DB
-    Harness -->|"broadcast_event<br/>(every run event)"| Group
-    HTTP -->|notification| Group
+    Topic -->|conversation| DB
+    Topic -->|"broadcast, with seq"| Group
+    HTTP -->|CUSTOM| Group
     Group -->|fan out| Consumer
-    Consumer -->|ServerMessage| Client
+    Consumer -->|ag_ui_event| Client
 ```
 
-The loop at the center is the whole idea: nothing is sent to "the socket that asked" —
-the harness broadcasts every run event (the echo of the user's prompt, text deltas,
-tool calls and results, approvals, `stream_end`, suggestion chips) into the
-conversation group, and each consumer forwards it to its client. One tab or five,
-same code path. The full event list lives in [protocol.md](protocol.md).
+The shape to notice is how little sits between the agent and the wire. There is no
+translation layer: pydantic-ai emits AG-UI events itself, and the topic's job is to
+choose a conversation, hand over dependencies, and publish.
 
-## The agent (`server/app/assistant/agent.py`)
+## Why there is no harness
 
-A plain [pydantic-ai](https://pydantic.dev/docs/ai/) agent. Three things are worth noting:
+`v1` had one — 352 lines translating pydantic-ai's stream into a bespoke message per
+event, tracking which tool calls were awaiting approval, and rebuilding transcripts
+from stored messages so a reload could render the same cards. All of it is gone,
+because the protocol already covers it:
 
-1. **`output_type=[TextAnswer, DeferredToolRequests]`** — every run ends as either a
-   structured answer (`content` + 3 `follow_ups` chips, produced in the same
-   completion) or a request for permission. Destructive tools are declared with
-   `@agent.tool(requires_approval=True)`; when the model calls one, the tool does
-   *not* execute — the run ends early with a `DeferredToolRequests` listing the
-   pending calls ([deferred tools docs](https://pydantic.dev/docs/ai/tools-toolsets/deferred-tools/)).
-2. **Every task tool takes `RunContext[AgentDeps]`** and scopes its DB calls to
-   `ctx.deps.conversation_id` — task lists are per conversation, and the same deps let
-   `schedule_reminder` broadcast back into the right group later.
-3. **`build_agent()` is a factory**, not a module-level singleton, so tests can build
-   the same agent wired to a fake model (`FunctionModel`). Contextvar-based
-   `Agent.override()` does not propagate into the consumer's task under the test
-   communicator, so tests patch the consumer's agent instead.
+| v1 did this by hand | AG-UI does it |
+| --- | --- |
+| `text_delta`, `tool_call`, `tool_result` messages | `TEXT_MESSAGE_*`, `TOOL_CALL_*` events |
+| `approval_request` + `PENDING_APPROVALS` dict | `RUN_FINISHED` carrying interrupts |
+| `tool_decision` message | `resume` on the next run input |
+| `history` replay + a transcript builder | the client keeps its own messages |
+| `tasks_updated` | `STATE_SNAPSHOT` |
 
-Prompting gotcha: the instructions explicitly tell the model to call destructive tools
-directly and **not** ask for confirmation in chat — the harness owns the approval UX.
-Without that line, models tend to ask "are you sure? (yes/no)" in prose and bypass the
-typed approval flow entirely.
+What remains is in `server/app/assistant/`, at 246 lines.
 
-## The harness (`server/app/assistant/harness.py`)
+## The agent (`agent.py`)
 
-`AgentHarness.run()` drives `agent.run_stream()` and translates pydantic-ai's
-streaming into protocol messages from two sources:
+A plain [pydantic-ai](https://ai.pydantic.dev) agent. Three things matter:
 
-- **`stream_output(debounce_by=None)`** yields partially-validated `TextAnswer`
-  snapshots; the harness diffs successive `content` values and sends the difference
-  as `text_delta` — live token streaming out of a structured output.
-- **`event_stream_handler`** receives the tool events fired while the graph runs.
+1. **`output_type=[str, DeferredToolRequests]`** — a run ends as text, or as the
+   approvals a destructive tool is waiting on. Destructive tools are declared with
+   `@agent.tool(requires_approval=True)`; when the model calls one it does *not*
+   execute — the run ends early with the pending calls
+   ([deferred tools](https://ai.pydantic.dev/tools-toolsets/deferred-tools/)).
+   v1 wrapped text in a `TextAnswer` model to carry follow-up chips alongside it;
+   AG-UI streams text directly, so the wrapper had no job left.
+2. **Every task tool takes `RunContext[AgentDeps]`** and scopes its queries to
+   `ctx.deps.conversation_id`, so task lists are per conversation and
+   `schedule_reminder` can notify the right thread later.
+3. **`build_agent()` is a factory**, so tests and the Playwright app can build the same
+   agent against a `FunctionModel`.
 
-| source                                       | WS message          |
-| -------------------------------------------- | ------------------- |
-| partial `TextAnswer.content` diff            | `text_delta`        |
-| `FunctionToolCallEvent` (handler)            | `tool_call`         |
-| `FunctionToolResultEvent` (handler)          | `tool_result`       |
-| final `TextAnswer`                           | `stream_end`, then `suggestions` (its `follow_ups`) |
-| `DeferredToolRequests` output                | `tool_call` per pending call (synthesized — `run_stream` stops eventing at the final result), then `approval_request` |
+Prompting gotcha, unchanged from v1: the instructions tell the model to call
+destructive tools directly and **not** ask for confirmation in prose. Without that,
+models tend to ask "are you sure?" in chat and bypass the approval flow entirely.
 
-After every run (including paused ones) the full message history is persisted with
-`result.all_messages_json()` and restored via `ModelMessagesTypeAdapter` on the next
-turn — multi-turn context, reconnect replay, and resume-after-approval all come from
-those two calls. The first run of a conversation also derives its title from the
-prompt (used by the sidebar via `GET /conversations`).
+## The topic (`topic.py`)
 
-`build_transcript()` turns that stored history back into the wire transcript: a
-union of text items and tool items (`kind: "text" | "tool"`). Tool status is derived
-from the persisted parts — a `ToolReturnPart` with `outcome="denied"` replays as
-`denied`, a call with no return part as `awaiting` — so a reload shows the same
-cards, in the same order, as the live stream did. The structured-output tool call
-(`final_result`, carrying the `TextAnswer`) is special-cased: it replays as the
-assistant's text, never as a tool card.
+`TaskletTopic` subclasses the `pydantic-ai-ag-ui` kit and overrides four things:
 
-The harness never touches a socket. It is constructed with a `send` callable; the
-consumer passes `broadcast_event` bound to the conversation group.
+- **`agent_deps`** — builds `AgentDeps(conversation_id=self.thread_id)`. The thread
+  *is* the conversation, so tools are scoped by where the client subscribed.
+- **`on_subscribe`** — sends the task list before the kit replays the run in flight, so
+  a client joining mid-run applies events on top of state that is already current.
+- **`save_history`** — persists, then names the conversation after its first prompt.
+- **`run_events`** — emits `STATE_SNAPSHOT` just before the run's last event. Note it
+  fires on `RUN_ERROR` too: a run that raises half way through has still changed the
+  task list, and a stale panel is the worse outcome.
 
-## Background runs and groups (`server/app/assistant/consumer.py`)
+## Where the conversation lives (`store.py`)
 
-Runs are **not** awaited inside the chat handler. `handle_chat` spawns the run as an
-asyncio task and returns immediately:
+AG-UI's model is that the client sends the whole message list with every run. This
+demo keeps it server-side instead, through the `conversation-store` kit over the
+existing `conversations` table.
 
-- A module-level `RUNNING` dict (keyed by conversation id) rejects concurrent runs
-  with a typed `agent_error`.
-- The task broadcasts every event to the group `conversation.{id}` via chanx's
-  `broadcast_event` classmethod.
-- Each consumer joins that group on connect. `passthrough_events` makes chanx generate
-  the event handlers that forward group events to the client verbatim (and documents
-  them in AsyncAPI).
+That is what makes the approval round trip pleasant: resuming carries an interrupt id
+and **no messages at all**, because the server already knows what it is resuming. It
+also means a fresh tab needs no transcript replay protocol — though it does mean the
+new tab starts with an empty chat log until the next run, which v1's `history` message
+avoided. That is the trade this version makes.
 
-Consequences, all covered by tests:
+The store holds an opaque string, so one backend serves any agent framework; this kit
+converts at the edge with `ModelMessagesTypeAdapter`.
 
-- **Refresh-proof**: the run keeps going with no socket attached; a reconnect replays
-  the transcript (tool cards included), the latest follow-up chips (persisted with
-  the conversation, cleared when the next run starts), and picks up live events. If
-  an approval is still pending, the consumer re-sends the `approval_request` on
-  connect so the new tab gets a working approval card, not a dead "awaiting" chip.
-- **Multi-tab**: every connection in the group receives the identical stream.
-- **Cross-connection approval**: pending `DeferredToolRequests` are stored in
-  `PENDING_APPROVALS` keyed by conversation (not connection), so the `tool_decision`
-  can arrive on any socket. (Store them in the database if they must survive restarts.)
-- **Per-conversation everything**: the task snapshot sent on connect, the
-  `tasks_updated` broadcasts, and the agent's tools all read the same conversation id
-  — a new chat starts empty, and `DELETE /conversations/{id}` (in `main.py`) removes
-  the history, the tasks, cancels an in-flight run, and drops pending approvals.
-- **Broadcast from anywhere**: `POST /conversations/{id}/notify` (in `main.py`) pushes
-  a typed `notification` from plain HTTP. Workers and cron jobs can do the same.
-- **Background jobs that notify back**: the `schedule_reminder` tool
-  (`server/app/assistant/reminders.py`) schedules an in-process job; when it fires —
-  possibly long after the run ended — it broadcasts a `notification` into the group.
-  The tool reads the conversation id from `RunContext[AgentDeps]`, which the harness
-  passes as `deps` on every run. Swapping the in-process job for a real worker
-  (ARQ, Celery) changes nothing but where the sleep happens.
+## Broadcast, and joining a run late
 
-## Configuration (`server/app/config.py`)
+`broadcast_run_events = True` sends every run event through the thread's group rather
+than down the socket that asked. Two consequences:
 
-All configuration is a typed [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/)
-`Settings` object, loaded from the environment and `server/.env` — no scattered
-`os.environ.get` calls. Model resolution lives here too: explicit `AGENT_MODEL`
-wins, otherwise the first configured provider key, otherwise pydantic-ai's `test`
-model. Consumer-wide defaults (like chanx's `send_completion`) sit on a shared
-`BaseConsumer` (`server/app/ws.py`) so new consumers inherit them.
+1. **The run outlives its connection.** Refreshing mid-answer does not cancel it, and
+   every other tab keeps streaming.
+2. **Ordering becomes the client's job.** Each event carries a per-run `seq` on the
+   chanx envelope — beside the message, not inside the AG-UI payload, so the event
+   itself stays standard.
 
-## Channel layer (`server/app/layers.py`)
+A connection that subscribes mid-run is replayed the run so far, which overlaps with
+what is already arriving live. AG-UI has no way to join a stream in progress: a content
+delta before its `TEXT_MESSAGE_START` is malformed. So the client applies events in
+sequence order, drops what it has already applied, and holds a gap until it fills
+(`web/src/lib/ws-client.ts`).
 
-`InMemoryChannelLayer` by default — one process, zero dependencies. Setting
-`REDIS_URL` switches to `RedisPubSubChannelLayer`, and the same group semantics work
-across multiple server instances and worker processes (`docker compose up -d redis`,
-then run two uvicorns — see the README).
+The replay buffer is in-memory in the kit, so this works within a process. Across
+instances, broadcast still works but replay does not — a shared `RunEventStore` is the
+missing piece.
 
-## The contract and the generated client
+## Notifications (`notify.py`, `reminders.py`)
 
-chanx builds an AsyncAPI 3.0 schema from the consumer's `@ws_handler` /
-`passthrough_events` declarations and serves it at `/asyncapi.json` (interactive docs
-at `/asyncapi`).
+AG-UI has no notification event, so they travel as `CUSTOM` with `name:
+"notification"` — the protocol's own escape hatch, which a strict client may ignore
+without breaking. `emit_to_thread` publishes into a conversation from outside any
+connection, which is what lets the HTTP endpoint and the reminder job both reach
+clients while holding no socket.
 
-`web/scripts/generate-types.mjs` fetches that schema, splits messages into
-client-bound vs server-bound using the AsyncAPI *operations* (inputs vs replies), and
-compiles them with `json-schema-to-typescript` into discriminated unions
-(`ClientMessage`, `ServerMessage`). One deliberate fix: Pydantic marks `action` as
-optional in JSON Schema (it has a default), but it is the discriminator — the script
-forces it into `required` so TypeScript can narrow on it. Nested unions get the same
-treatment for free by declaring their discriminator *without* a default in Pydantic
-(see `TranscriptItem.kind` in `messages.py`).
+## Testing
 
-On the client, `web/src/lib/chat-state.ts` is a single exhaustive `switch` over
-`ServerMessage["action"]` — adding a server message without handling it is a compile
-error after regeneration.
+Two layers, both without a model provider:
 
-## Testing (`server/tests/`)
-
-The whole protocol runs offline: pydantic-ai's `FunctionModel` scripts the agent —
-stream functions yield `DeltaToolCall`s for task tools, and finish by streaming the
-`final_result` output tool's JSON in chunks (which exercises the partial-validation
-text-delta path) — and chanx's `WebsocketCommunicator` drives the consumer. Because runs are background tasks, tests collect messages until
-a terminal action (`stream_end` / `approval_request` / `agent_error`) instead of
-waiting for handler completion. The conversation HTTP endpoints are tested through
-`httpx.ASGITransport` against the same app. See [protocol.md](protocol.md) for the
-exact sequences the tests assert.
+- **`server/tests/`** drives the real consumer through chanx's `WebsocketCommunicator`
+  against `FunctionModel`, asserting event sequences, the approval round trip, that
+  both tabs see the same `seq`, and that a failed run still publishes its tasks.
+- **`web/e2e/`** drives Chromium with Playwright, which starts both servers itself.
+  `tests/e2e_app.py` swaps in a scripted model so an assertion never depends on a
+  provider's mood. It reads task ids out of a `list_tasks` result rather than assuming
+  them — the table counts up across conversations, so the first task is rarely id 1.
