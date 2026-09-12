@@ -56,8 +56,9 @@ The events this server emits:
 | `TEXT_MESSAGE_START` / `_CONTENT` / `_END` | the answer, streamed per message id |
 | `TOOL_CALL_START` / `_ARGS` / `_END` | a tool call, with arguments streamed as a JSON string |
 | `TOOL_CALL_RESULT` | a tool returned |
+| `MESSAGES_SNAPSHOT` | the conversation so far, on subscribe |
 | `STATE_SNAPSHOT` | the task list: `{"tasks": [{id, title, done}]}` |
-| `CUSTOM` | `name: "notification"`, `value: {title, body}` |
+| `CUSTOM` | `name: "notification"`, `value: {title, body}` — or `name: "suggestions"`, `value: {prompts}` |
 
 `STATE_SNAPSHOT` is sent on subscribe, and again immediately before each run's last
 event — including on `RUN_ERROR`, since a run that fails part-way through has still
@@ -68,12 +69,20 @@ changed the task list.
 A new subscription receives, in order:
 
 1. `subscribed` — the reply, carrying your `ref`
-2. `STATE_SNAPSHOT` — the current task list, with no `seq`
-3. the run in flight, if any: every event so far, replayed with its original `seq`
+2. `MESSAGES_SNAPSHOT` — the conversation so far, omitted when there is none
+3. `STATE_SNAPSHOT` — the current task list
+4. `CUSTOM` / `suggestions` — the last answer's chips, if any
+5. the run in flight, if any: every event so far, replayed with its original `seq`
 
-Step 3 is what makes a mid-run refresh work. AG-UI has no way to join a stream in
-progress — a content delta arriving before its `TEXT_MESSAGE_START` is malformed — so
-the run is replayed from `RUN_STARTED` rather than picked up mid-flight.
+Steps 2–4 carry no `seq`; they are state, not part of a run. Step 5 is what makes a
+mid-run refresh work.
+
+`MESSAGES_SNAPSHOT` **replaces** what the client is showing rather than appending to
+it — it is the server's copy, and a reconnect must not double the transcript.
+
+The run is replayed from `RUN_STARTED` rather than picked up mid-flight because AG-UI
+has no way to join a stream in progress: a content delta arriving before its
+`TEXT_MESSAGE_START` is malformed.
 
 ## Ordering, and what the client owes you
 
@@ -106,6 +115,7 @@ client                                    server
   │ subscribe {topic}                        │
   │─────────────────────────────────────────▶│
   │◀──────────────────────────── subscribed  │
+  │◀──────────────────── MESSAGES_SNAPSHOT   │  the conversation so far
   │◀─────────────────────── STATE_SNAPSHOT   │  current task list
   │ ag_ui_run {messages: [user turn]}        │
   │─────────────────────────────────────────▶│
@@ -114,6 +124,7 @@ client                                    server
   │◀────────────────────── TOOL_CALL_RESULT  │
   │◀──────────── TEXT_MESSAGE_START/CONTENT… │
   │◀─────────────────────── STATE_SNAPSHOT   │  tasks after the run
+  │◀──────────────── CUSTOM / "suggestions"  │  3 follow-up chips
   │◀───────────────────────── RUN_FINISHED   │  outcome: success
 ```
 
@@ -179,7 +190,9 @@ POST /conversations/{conversation_id}/notify
 {"title": "Reminder", "body": "Stand-up in 5 minutes"}
 ```
 
-Every client on the conversation receives a `CUSTOM` event named `notification`. The
+Every client on the conversation receives a `CUSTOM` event named `notification`.
+(`CUSTOM` is also how follow-up chips travel, under `name: "suggestions"` — AG-UI has
+no event for either, and a strict client may ignore both without breaking.) The
 `schedule_reminder` tool works the same way from the inside: the tool schedules a
 background job, the run finishes normally, and the job emits into the thread when it
 fires — ask *"remind me in 15 seconds to stretch"* to watch it.

@@ -83,11 +83,7 @@ export function HelpModal({ server, conversation, onClose }: Props) {
           >
             Source + guide
           </a>
-          <a
-            href="https://ai.pydantic.dev"
-            target="_blank"
-            rel="noreferrer"
-          >
+          <a href="https://ai.pydantic.dev" target="_blank" rel="noreferrer">
             Pydantic AI
           </a>
           <a

@@ -74,6 +74,25 @@ def use_flow(monkeypatch: pytest.MonkeyPatch) -> UseFlow:
     return _use
 
 
+CHIPS = ["List my tasks", "Mark it done", "Add another task"]
+
+
+@pytest.fixture(autouse=True)
+def scripted_suggester(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TestModel returns an empty list for `list[str]`, so chips would never fire."""
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from app.assistant import suggestions
+
+    def chips(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[ToolCallPart("final_result", {"prompts": CHIPS})])
+
+    monkeypatch.setattr(
+        suggestions, "suggester", suggestions.build_suggester(FunctionModel(chips))
+    )
+
+
 def communicator() -> WebsocketCommunicator:
     return WebsocketCommunicator(app, "/ws/agent", consumer=AgentConsumer)
 
@@ -310,3 +329,44 @@ async def test_a_failed_run_still_publishes_the_task_list(use_flow: UseFlow) -> 
     assert snapshots, types_of(events)
     titles = [t["title"] for t in snapshots[-1]["payload"]["snapshot"]["tasks"]]
     assert titles == ["Survivor"]
+
+
+async def test_a_reconnect_is_replayed_the_conversation(use_flow: UseFlow) -> None:
+    """The paper trail: a new connection is told the conversation, as AG-UI
+    messages, so a reload does not start from a blank page."""
+    use_flow(add_task_flow)
+
+    async with communicator() as comm:
+        await subscribe(comm)
+        await send_run(comm)
+        await drain_run(comm)
+
+    async with communicator() as fresh:
+        await fresh.subscribe(THREAD)
+        first = await fresh.receive_json_from(5)
+
+    assert first["payload"]["type"] == "MESSAGES_SNAPSHOT"
+    messages = first["payload"]["messages"]
+    assert [m["role"] for m in messages][:2] == ["user", "assistant"]
+    assert any(m.get("content") == "add a task" for m in messages)
+    assert any(m.get("toolCalls") for m in messages)
+
+
+async def test_follow_up_chips_are_sent_and_replayed(use_flow: UseFlow) -> None:
+    use_flow(add_task_flow)
+
+    async with communicator() as comm:
+        await subscribe(comm)
+        await send_run(comm)
+        events = await drain_run(comm)
+
+    chips = [
+        e
+        for e in events
+        if e["payload"]["type"] == "CUSTOM" and e["payload"]["name"] == "suggestions"
+    ]
+    assert chips, types_of(events)
+    assert chips[-1]["payload"]["value"]["prompts"]
+
+    # Persisted, so a reconnect gets them back without another model call.
+    assert await db.load_suggestions(CONVERSATION)

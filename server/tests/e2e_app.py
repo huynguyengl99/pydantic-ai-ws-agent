@@ -11,6 +11,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
 )
@@ -21,6 +22,7 @@ from pydantic_ai.models.function import (
     FunctionModel,
 )
 
+from app.assistant import suggestions
 from app.assistant.agent import build_agent
 from app.assistant.topic import TaskletTopic
 from app.db import TaskItem
@@ -114,4 +116,18 @@ async def script(
         yield {0: DeltaToolCall(name="add_task", json_args='{"title": "Ship v2"}')}
 
 
+def chips(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    """TestModel returns an empty list for `list[str]`, so the chips need scripting
+    too, or the browser would never see any."""
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                "final_result",
+                {"prompts": ["What's on my list?", "Mark it done", "Add another"]},
+            )
+        ]
+    )
+
+
 TaskletTopic.agent = build_agent(FunctionModel(stream_function=script))
+suggestions.suggester = suggestions.build_suggester(FunctionModel(chips))

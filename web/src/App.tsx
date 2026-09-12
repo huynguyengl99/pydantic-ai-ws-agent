@@ -71,7 +71,7 @@ export default function App() {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [state.items]);
+  }, [state.items, state.suggestions]);
 
   const pendingApproval = useMemo(
     () =>
@@ -238,6 +238,21 @@ export default function App() {
                 <span />
               </div>
             )}
+            {state.suggestions.length > 0 &&
+              !state.running &&
+              !pendingApproval && (
+                <div className="suggestions followups">
+                  {state.suggestions.map((text) => (
+                    <button
+                      key={text}
+                      className="suggestion"
+                      onClick={() => sendText(text)}
+                    >
+                      {text}
+                    </button>
+                  ))}
+                </div>
+              )}
           </div>
 
           <form

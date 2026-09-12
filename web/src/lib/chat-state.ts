@@ -1,4 +1,4 @@
-import type { BaseEvent, Interrupt } from "@ag-ui/core";
+import type { BaseEvent, Interrupt, Message } from "@ag-ui/core";
 
 export interface TaskItem {
   id: number;
@@ -40,6 +40,7 @@ export interface ChatState {
   items: ChatItem[];
   tasks: TaskItem[];
   toasts: Toast[];
+  suggestions: string[];
   running: boolean;
 }
 
@@ -47,6 +48,7 @@ export const initialState: ChatState = {
   items: [],
   tasks: [],
   toasts: [],
+  suggestions: [],
   running: false,
 };
 
@@ -89,10 +91,72 @@ function updateTool(
   );
 }
 
+/**
+ * A stored conversation, as chat items.
+ *
+ * Tool results arrive as their own `role: "tool"` messages keyed by call id, so
+ * they are indexed first and then folded into the call they answer.
+ */
+/** User content may be multimodal; the transcript shows its text. */
+function plainText(content: Message["content"]): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => (part.type === "text" ? part.text : `[${part.type}]`))
+    .join(" ");
+}
+
+export function transcriptItems(messages: Message[]): ChatItem[] {
+  const results = new Map<string, unknown>();
+  for (const message of messages) {
+    if (message.role === "tool") {
+      results.set(message.toolCallId, message.content);
+    }
+  }
+
+  const items: ChatItem[] = [];
+  for (const message of messages) {
+    if (message.role === "user") {
+      items.push({
+        kind: "user",
+        id: message.id,
+        text: plainText(message.content),
+      });
+      continue;
+    }
+    if (message.role !== "assistant") continue;
+
+    if (message.content) {
+      items.push({
+        kind: "assistant",
+        id: message.id,
+        text: message.content,
+        streaming: false,
+      });
+    }
+    for (const call of message.toolCalls ?? []) {
+      const result = results.get(call.id);
+      items.push({
+        kind: "tool",
+        id: call.id,
+        // A call with no result never ran: it is still waiting on approval.
+        status: result === undefined ? "awaiting" : "done",
+        result,
+        call: {
+          toolCallId: call.id,
+          toolCallName: call.function.name,
+          args: call.function.arguments,
+        },
+      });
+    }
+  }
+  return items;
+}
+
 function applyEvent(state: ChatState, event: BaseEvent): ChatState {
   switch (event.type) {
     case "RUN_STARTED":
-      return { ...state, running: true };
+      return { ...state, running: true, suggestions: [] };
 
     case "TEXT_MESSAGE_START":
       return state;
@@ -166,8 +230,20 @@ function applyEvent(state: ChatState, event: BaseEvent): ChatState {
       return { ...state, tasks: snapshot?.tasks ?? state.tasks };
     }
 
+    case "MESSAGES_SNAPSHOT": {
+      // The conversation as the server has it. Replaces what is on screen rather
+      // than appending: this is the truth, and a reconnect must not double it.
+      const messages = field<Message[]>(event, "messages") ?? [];
+      return { ...state, items: transcriptItems(messages) };
+    }
+
     case "CUSTOM": {
-      if (field<string>(event, "name") !== "notification") return state;
+      const name = field<string>(event, "name");
+      if (name === "suggestions") {
+        const value = field<{ prompts?: string[] }>(event, "value");
+        return { ...state, suggestions: value?.prompts ?? [] };
+      }
+      if (name !== "notification") return state;
       const value = field<{ title: string; body: string }>(event, "value");
       return {
         ...state,

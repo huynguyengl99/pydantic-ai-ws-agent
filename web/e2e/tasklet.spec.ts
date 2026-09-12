@@ -114,3 +114,31 @@ test("a reminder tool notifies the conversation back", async ({ page }) => {
 
   await expect(page.locator(".toast")).toContainText("stretch");
 });
+
+test("a reload replays the conversation", async ({ page }) => {
+  await open(page, "e2e-reload");
+  await ask(page, "add a task");
+  await expect(page.locator(".messages")).toContainText("done.");
+
+  await page.reload();
+  await expect(page.locator(".conn")).toHaveText(/open/);
+
+  // The paper trail: prompt, tool card and answer all come back from the server.
+  await expect(page.locator(".messages")).toContainText("add a task");
+  await expect(page.locator(".tool-card")).toContainText("add_task");
+  await expect(page.locator(".messages")).toContainText("done.");
+  await expect(page.locator(".task-items li")).toHaveText(/Ship v2/);
+});
+
+test("follow-up chips appear and survive a reload", async ({ page }) => {
+  await open(page, "e2e-chips");
+  await ask(page, "add a task");
+
+  const chips = page.locator(".followups .suggestion");
+  await expect(chips.first()).toBeVisible();
+  await expect(chips).toHaveCount(3);
+
+  await page.reload();
+  await expect(page.locator(".conn")).toHaveText(/open/);
+  await expect(page.locator(".followups .suggestion")).toHaveCount(3);
+});
