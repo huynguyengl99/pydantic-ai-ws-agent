@@ -2,3 +2,6 @@ dist
 node_modules
 src/generated
 pnpm-lock.yaml
+test-results/
+playwright-report/
+dist/
