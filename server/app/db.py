@@ -134,6 +134,18 @@ async def save_history(
         await conn.commit()
 
 
+async def set_title(conversation_id: str, title: str | None) -> None:
+    """Name a conversation from its first prompt, once."""
+    if not title:
+        return
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            "UPDATE conversations SET title = ? WHERE id = ? AND title IS NULL",
+            (title, conversation_id),
+        )
+        await conn.commit()
+
+
 async def load_suggestions(conversation_id: str) -> list[str]:
     async with aiosqlite.connect(DB_PATH) as conn:
         rows = await conn.execute_fetchall(

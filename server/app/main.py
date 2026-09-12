@@ -12,9 +12,8 @@ from starlette.applications import Starlette
 from starlette.routing import WebSocketRoute
 
 from app import db
-from app.assistant.consumer import RUNNING, AgentConsumer, conversation_group
-from app.assistant.harness import PENDING_APPROVALS
-from app.assistant.messages import NotificationMessage, NotificationPayload
+from app.assistant.consumer import AgentConsumer
+from app.assistant.notify import notify_conversation as emit_notification
 from app.config import settings
 from app.layers import setup_layers
 
@@ -37,8 +36,8 @@ app.add_middleware(
 )
 
 asyncapi_conf = AsyncAPIConfig(
-    description="Typed WebSocket contract for the Pydantic AI task assistant",
-    version="1.0.0",
+    description="AG-UI over a WebSocket for the Pydantic AI task assistant",
+    version="2.0.0",
 )
 
 
@@ -64,10 +63,6 @@ async def list_conversations() -> list[db.ConversationItem]:
 
 @app.delete("/conversations/{conversation_id}", tags=["Conversations"])
 async def delete_conversation(conversation_id: str) -> dict[str, bool]:
-    running = RUNNING.pop(conversation_id, None)
-    if running is not None:
-        running.cancel()
-    PENDING_APPROVALS.pop(conversation_id, None)
     if not await db.delete_conversation(conversation_id):
         raise HTTPException(status_code=404, detail="Unknown conversation")
     return {"deleted": True}
@@ -82,17 +77,12 @@ class NotifyRequest(BaseModel):
 async def notify_conversation(
     conversation_id: str, request: NotifyRequest
 ) -> dict[str, bool]:
-    """Broadcast a notification into a conversation from plain HTTP.
+    """Push a notification into a conversation from plain HTTP.
 
-    Demonstrates chanx's broadcast-from-anywhere: any HTTP endpoint, background
-    job, or worker can push typed events to WebSocket clients via the channel layer.
+    Broadcast-from-anywhere: an endpoint, a job or a worker reaches every client
+    on the thread through the channel layer, holding no socket of its own.
     """
-    await AgentConsumer.broadcast_event(
-        NotificationMessage(
-            payload=NotificationPayload(title=request.title, body=request.body)
-        ),
-        groups=conversation_group(conversation_id),
-    )
+    await emit_notification(conversation_id, request.title, request.body)
     return {"delivered": True}
 
 

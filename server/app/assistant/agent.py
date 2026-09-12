@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-from pydantic import BaseModel, Field
 from pydantic_ai import Agent, DeferredToolRequests, RunContext
 from pydantic_ai.models import Model
 
@@ -19,27 +18,7 @@ tool directly — do NOT ask for confirmation in chat. The system automatically 
 destructive tool calls and asks the user for approval in the UI.
 When a destructive tool call is denied, acknowledge it and do not retry.
 Keep responses short and conversational. Refer to tasks by their id and title.
-
-Also populate `follow_ups` with exactly 3 short prompts the user is likely to send
-next — in the user's voice, in the answer's language, each concise enough to fit a
-small chip (at most 8 words). Ground them in the actual task list: refer to real
-tasks by id or title, suggest completing open tasks, adding an obvious missing step,
-or a reminder when timing matters. At most ONE may be a destructive action
-(delete / clear all). Never suggest anything you cannot actually do.
 """
-
-
-class TextAnswer(BaseModel):
-    """Final answer to the user, with suggested follow-up prompts."""
-
-    content: str = Field(description="The answer text to show the user.")
-    follow_ups: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Exactly 3 short prompts the user is likely to send next, in their "
-            "voice and the answer's language. Chip-sized (at most 8 words each)."
-        ),
-    )
 
 
 @dataclass
@@ -47,16 +26,16 @@ class AgentDeps:
     conversation_id: str
 
 
-# Every run ends as either a final answer (text + follow-up chips) or a request
-# for tool approval.
-AgentOutput = TextAnswer | DeferredToolRequests
+# A run ends as text, or as the approvals a destructive tool is waiting on. The
+# text is streamed by AG-UI itself, so it needs no wrapper type of its own.
+AgentOutput = str | DeferredToolRequests
 
 
 def build_agent(model: Model | str | None = None) -> Agent[AgentDeps, AgentOutput]:
     agent: Agent[AgentDeps, AgentOutput] = Agent(
         model or settings.resolved_model,
         deps_type=AgentDeps,
-        output_type=[TextAnswer, DeferredToolRequests],
+        output_type=[str, DeferredToolRequests],
         instructions=INSTRUCTIONS,
     )
 

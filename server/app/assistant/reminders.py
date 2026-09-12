@@ -5,11 +5,11 @@ _tasks: set[asyncio.Task[None]] = set()
 
 
 def schedule(conversation_id: str, message: str, delay_seconds: float) -> None:
-    """Fire a notification into the conversation group after a delay.
+    """Fire a notification into the conversation after a delay.
 
     In-process on purpose — the demo runs with zero infrastructure. A real
     worker (ARQ, Celery, cron) does exactly the same thing: sleep somewhere
-    else, then call `AgentConsumer.broadcast_event` with the same message.
+    else, then emit into the thread by id.
     """
     task = asyncio.create_task(_fire(conversation_id, message, delay_seconds))
     _tasks.add(task)
@@ -18,13 +18,7 @@ def schedule(conversation_id: str, message: str, delay_seconds: float) -> None:
 
 async def _fire(conversation_id: str, message: str, delay_seconds: float) -> None:
     await asyncio.sleep(delay_seconds)
-    # Imported lazily: the consumer module imports the agent package at startup.
-    from app.assistant.consumer import AgentConsumer, conversation_group
-    from app.assistant.messages import NotificationMessage, NotificationPayload
+    # Imported lazily: the topic module imports the agent package at startup.
+    from app.assistant.notify import notify_conversation
 
-    await AgentConsumer.broadcast_event(
-        NotificationMessage(
-            payload=NotificationPayload(title="Reminder", body=message)
-        ),
-        groups=conversation_group(conversation_id),
-    )
+    await notify_conversation(conversation_id, "Reminder", message)
