@@ -21,7 +21,7 @@ import {
   fetchConversations,
 } from "./lib/conversations";
 import { useAgentSocket } from "./lib/ws-client";
-import type { ServerMessage } from "./generated/messages";
+import type { BaseEvent } from "@ag-ui/core";
 
 const SERVER =
   (import.meta.env.VITE_SERVER_URL as string | undefined) ?? "localhost:8000";
@@ -48,18 +48,19 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  const onMessage = useCallback(
-    (msg: ServerMessage) => {
-      dispatch({ type: "server", msg });
+  const onEvent = useCallback(
+    (event: BaseEvent) => {
+      dispatch({ type: "event", event });
       // A finished run may have set the title or bumped updated_at.
-      if (msg.action === "stream_end") refreshConversations();
+      if (event.type === "RUN_FINISHED") refreshConversations();
     },
     [refreshConversations],
   );
 
-  const { status, send: sendMessage } = useAgentSocket(
-    `ws://${SERVER}/ws/agent?conversation=${conversation}`,
-    onMessage,
+  const { status, runAgent } = useAgentSocket(
+    `ws://${SERVER}/ws/agent`,
+    conversation,
+    onEvent,
   );
 
   // Switching conversations reconnects (the url changes); reset local state.
@@ -70,7 +71,7 @@ export default function App() {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [state.items, state.suggestions]);
+  }, [state.items]);
 
   const pendingApproval = useMemo(
     () =>
@@ -82,34 +83,29 @@ export default function App() {
 
   const sendText = (text: string) => {
     if (!text || status !== "open" || state.running || pendingApproval) return;
-    sendMessage({ action: "chat", payload: { text } });
-    dispatch({ type: "sent_prompt" });
+    // Only the new turn: the conversation itself lives on the server.
+    runAgent({
+      messages: [{ id: crypto.randomUUID(), role: "user", content: text }],
+    });
+    dispatch({ type: "sent_prompt", text });
     setDraft("");
   };
 
   const send = () => sendText(draft.trim());
 
-  const decide = (
-    id: string,
-    calls: { tool_call_id: string }[],
-    approved: boolean,
-  ) => {
-    sendMessage({
-      action: "tool_decision",
-      payload: {
-        decisions: calls.map((call) => ({
-          tool_call_id: call.tool_call_id,
-          approved,
-          reason: approved ? null : "Denied from the web UI",
-        })),
-      },
+  const decide = (id: string, interruptIds: string[], approved: boolean) => {
+    // Resuming is another run: the interrupt id says which pause it answers,
+    // and no messages are needed because the server kept the conversation.
+    runAgent({
+      resume: interruptIds.map((interruptId) => ({
+        interruptId,
+        status: "resolved",
+        payload: approved
+          ? { approved: true }
+          : { approved: false, reason: "Denied from the web UI" },
+      })),
     });
-    dispatch({
-      type: "resolved_approval",
-      id,
-      approved,
-      callIds: calls.map((c) => c.tool_call_id),
-    });
+    dispatch({ type: "resolved_approval", id, approved });
   };
 
   const newConversation = () => {
@@ -141,12 +137,8 @@ export default function App() {
         <h1 className="wordmark">
           Tasklet<span className="wordmark-dot">.</span>
         </h1>
-        <span className="tagline">pydantic-ai · typed websockets · chanx</span>
+        <span className="tagline">pydantic-ai · AG-UI · chanx</span>
         <div className="topbar-right">
-          <span className="usage">
-            {state.usage.input + state.usage.output > 0 &&
-              `${state.usage.input}↑ ${state.usage.output}↓ tokens`}
-          </span>
           <button className="btn btn-ghost" onClick={() => setShowHelp(true)}>
             Help
           </button>
@@ -223,18 +215,13 @@ export default function App() {
                       key={item.id}
                       item={item}
                       onDecide={(approved) =>
-                        decide(item.id, item.calls, approved)
+                        decide(
+                          item.id,
+                          item.interrupts.map((i) => i.id),
+                          approved,
+                        )
                       }
                     />
-                  );
-                case "notification":
-                  return (
-                    <div key={item.id} className="notif-item">
-                      <span className="toast-badge">notification</span>
-                      <span>
-                        <strong>{item.title}</strong> — {item.body}
-                      </span>
-                    </div>
                   );
                 case "error":
                   return (
@@ -251,21 +238,6 @@ export default function App() {
                 <span />
               </div>
             )}
-            {state.suggestions.length > 0 &&
-              !state.running &&
-              !pendingApproval && (
-                <div className="suggestions followups">
-                  {state.suggestions.map((text) => (
-                    <button
-                      key={text}
-                      className="suggestion"
-                      onClick={() => sendText(text)}
-                    >
-                      {text}
-                    </button>
-                  ))}
-                </div>
-              )}
           </div>
 
           <form

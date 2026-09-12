@@ -1,4 +1,4 @@
-import type { TaskItem } from "../generated/messages";
+import type { TaskItem } from "../lib/chat-state";
 
 export function TaskPanel({ tasks }: { tasks: TaskItem[] }) {
   const open = tasks.filter((t) => !t.done).length;
@@ -26,8 +26,8 @@ export function TaskPanel({ tasks }: { tasks: TaskItem[] }) {
         </ul>
       )}
       <p className="task-note">
-        Live from <code>tasks_updated</code> — the server pushes this after
-        every tool run.
+        Live from AG-UI <code>STATE_SNAPSHOT</code> — sent on connect and again
+        with every run.
       </p>
     </aside>
   );

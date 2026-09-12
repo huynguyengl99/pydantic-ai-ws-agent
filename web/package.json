@@ -9,15 +9,15 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "generate": "node scripts/generate-types.mjs",
-    "lint": "eslint src scripts",
-    "lint:fix": "eslint src scripts --fix",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
     "format": "prettier . --check",
     "format:fix": "prettier . --write",
     "typecheck": "tsc --noEmit",
     "check": "pnpm lint && pnpm format && pnpm typecheck"
   },
   "dependencies": {
+    "@ag-ui/core": "^0.0.59",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",

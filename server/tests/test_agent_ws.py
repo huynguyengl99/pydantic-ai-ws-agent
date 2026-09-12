@@ -278,3 +278,35 @@ async def test_http_can_notify_a_conversation() -> None:
 
     assert message["payload"]["type"] == "CUSTOM"
     assert message["payload"]["value"]["body"] == "from curl"
+
+
+async def failing_tool_flow(
+    messages: list[ModelMessage], info: AgentInfo
+) -> AsyncIterator[str | DeltaToolCalls]:
+    """Adds a task, then in a later turn calls a tool that raises.
+
+    Two turns rather than two calls in one: tools within a response run
+    concurrently, so the raising one could otherwise beat the write it is meant
+    to happen after.
+    """
+    if is_first_turn(messages):
+        yield {0: DeltaToolCall(name="add_task", json_args='{"title": "Survivor"}')}
+    else:
+        yield {0: DeltaToolCall(name="complete_task", json_args='{"task_id": 999}')}
+
+
+async def test_a_failed_run_still_publishes_the_task_list(use_flow: UseFlow) -> None:
+    """A run that raises half way through has still changed the list, and a
+    stale panel is worse than a failed run."""
+    use_flow(failing_tool_flow)
+
+    async with communicator() as comm:
+        await subscribe(comm)
+        await send_run(comm)
+        events = await drain_run(comm)
+
+    assert types_of(events)[-1] == "RUN_ERROR"
+    snapshots = [e for e in events if e["payload"]["type"] == "STATE_SNAPSHOT"]
+    assert snapshots, types_of(events)
+    titles = [t["title"] for t in snapshots[-1]["payload"]["snapshot"]["tasks"]]
+    assert titles == ["Survivor"]

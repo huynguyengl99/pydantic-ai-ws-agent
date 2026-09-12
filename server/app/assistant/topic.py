@@ -1,7 +1,6 @@
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import AsyncIterator, Sequence
 
-from ag_ui.core import EventType, RunAgentInput, StateSnapshotEvent
+from ag_ui.core import Event, EventType, RunAgentInput, StateSnapshotEvent
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 
 from app import db
@@ -66,8 +65,12 @@ class TaskletTopic(PydanticAIAgUiTopic):
         await super().save_history(messages)
         await db.set_title(self.thread_id, derive_title(messages))
 
-    async def on_run_complete(self, result: Any) -> None:
-        await super().on_run_complete(result)
-        # Tools mutate the task list, so publish it with the run rather than
-        # making the client refetch.
-        await self.emit(await self.task_state())
+    async def run_events(self, run_input: RunAgentInput) -> AsyncIterator[Event]:
+        # Tools mutate the task list, so the run carries the result rather than
+        # leaving the client to refetch. Emitted before the run's last event and
+        # on the failing path too: a run that raises half way through has still
+        # changed the list, and a stale panel is the worse outcome.
+        async for event in super().run_events(run_input):
+            if event.type in (EventType.RUN_FINISHED, EventType.RUN_ERROR):
+                yield await self.task_state()
+            yield event

@@ -25,10 +25,10 @@ export function ToolCallCard({
                 ? "◍"
                 : "○"}
         </span>
-        <span className="tool-name">{call.tool_name}</span>
+        <span className="tool-name">{call.toolCallName}</span>
         <span className="tool-status">{STATUS_LABEL[status]}</span>
       </div>
-      <pre className="tool-args">{JSON.stringify(call.args, null, 0)}</pre>
+      {call.args && <pre className="tool-args">{call.args}</pre>}
       {result !== undefined && (
         <pre className="tool-result">→ {JSON.stringify(result)}</pre>
       )}

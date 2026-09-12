@@ -13,15 +13,14 @@ export function ApprovalCard({ item, onDecide }: Props) {
       <div className="approval-title">
         <span className="approval-badge">approval required</span>
         The agent wants to run{" "}
-        {item.calls.length === 1
+        {item.interrupts.length === 1
           ? "a destructive tool"
-          : `${item.calls.length} destructive tools`}
+          : `${item.interrupts.length} destructive tools`}
       </div>
       <ul className="approval-calls">
-        {item.calls.map((call) => (
-          <li key={call.tool_call_id}>
-            <code>{call.tool_name}</code>
-            <code className="approval-args">{JSON.stringify(call.args)}</code>
+        {item.interrupts.map((interrupt) => (
+          <li key={interrupt.id}>
+            <code className="approval-args">{interrupt.message}</code>
           </li>
         ))}
       </ul>
