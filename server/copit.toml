@@ -1,0 +1,32 @@
+target = "vendor"
+
+[registries.chanx-kit]
+source = "github:huynguyengl99/chanx-kit@main"
+target = "app/ws_kits"
+
+[[sources]]
+path = "app/ws_kits/ag_ui"
+source = "github:huynguyengl99/chanx-kit@main/kits/ag_ui"
+ref = "main"
+commit = "9a9dbd645ed9b1323d07946d9bc0a68ac55f8a75"
+copied_at = "2026-09-12T14:10:37Z"
+component = "chanx-kit:ag-ui"
+component_version = "0.2.0"
+
+[[sources]]
+path = "app/ws_kits/conversation_store"
+source = "github:huynguyengl99/chanx-kit@main/kits/conversation_store"
+ref = "main"
+commit = "9a9dbd645ed9b1323d07946d9bc0a68ac55f8a75"
+copied_at = "2026-09-12T14:10:37Z"
+component = "chanx-kit:conversation-store"
+component_version = "0.1.0"
+
+[[sources]]
+path = "app/ws_kits/pydantic_ai_ag_ui"
+source = "github:huynguyengl99/chanx-kit@main/kits/pydantic_ai_ag_ui"
+ref = "main"
+commit = "9a9dbd645ed9b1323d07946d9bc0a68ac55f8a75"
+copied_at = "2026-09-12T14:10:37Z"
+component = "chanx-kit:pydantic-ai-ag-ui"
+component_version = "0.1.0"

@@ -6,13 +6,14 @@ license = "MIT"
 authors = [{ name = "Huy Nguyen", email = "ndhgl99@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = [
-    "pydantic-ai-slim[openai,anthropic]>=2.9",
-    "chanx[fast_channels]>=2.8.0",
+    "pydantic-ai-slim[ag-ui,anthropic,openai]>=2.13",
+    "chanx[fast-channels]>=2.10.0,<3",
     "fast-channels[redis]>=1.0.3",
     "aiosqlite>=0.20",
     "uvicorn[standard]>=0.30",
     "python-dotenv>=1.0",
     "pydantic-settings>=2.14.2",
+    "ag-ui-protocol>=0.1.19",
 ]
 
 [dependency-groups]

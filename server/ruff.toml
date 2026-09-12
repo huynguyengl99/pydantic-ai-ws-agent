@@ -1,6 +1,10 @@
 src = ["."]
 target-version = "py311"
 
+# Copied in by copit and owned upstream. Reformatting them here would turn every
+# `copit update` into a conflict, and chanx-kit lints them under its own config.
+extend-exclude = ["app/ws_kits"]
+
 [lint]
 ignore = [
   "C901",  # Function is too complex
