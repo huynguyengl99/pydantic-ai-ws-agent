@@ -7,7 +7,7 @@ authors = [{ name = "Huy Nguyen", email = "ndhgl99@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = [
     "pydantic-ai-slim[ag-ui,anthropic,openai]>=2.13",
-    "chanx[fast-channels]>=2.10.0,<3",
+    "chanx[fast-channels]>=2.10.2,<3",
     "fast-channels[redis]>=1.0.3",
     "aiosqlite>=0.20",
     "uvicorn[standard]>=0.30",
