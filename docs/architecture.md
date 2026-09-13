@@ -78,7 +78,8 @@ models tend to ask "are you sure?" in chat and bypass the approval flow entirely
 - **`on_subscribe`** — sends the task list before the kit replays the run in flight, so
   a client joining mid-run applies events on top of state that is already current.
 - **`save_history`** — persists, then names the conversation after its first prompt.
-- **`on_subscribe`** — also emits the transcript and any stored follow-up chips.
+- **`send_initial_state`** — adds the task list and any stored chips to the transcript
+  the kit already sends, all of it before the run in flight is replayed.
 - **`run_events`** — emits `STATE_SNAPSHOT` just before the run's last event. Note it
   fires on `RUN_ERROR` too: a run that raises half way through has still changed the
   task list, and a stale panel is the worse outcome.
@@ -92,11 +93,12 @@ existing `conversations` table.
 That is what makes the approval round trip pleasant: resuming carries an interrupt id
 and **no messages at all**, because the server already knows what it is resuming.
 
-It is also what restores the paper trail without a protocol of our own. On subscribe
-the topic loads the conversation and emits `MESSAGES_SNAPSHOT`, converted by
-`AGUIAdapter.dump_messages` — the same adapter that writes the live stream knows how
-to dump stored messages into it, so a reload renders the same prompts, tool cards and
-answers. v1 needed a 65-line transcript builder for this.
+It is also what restores the paper trail without a protocol of our own. The kit emits
+`MESSAGES_SNAPSHOT` on subscribe, converted by `AGUIAdapter.dump_messages` — the same
+adapter that writes the live stream knows how to dump stored messages into it, so a
+reload renders the same prompts, tool cards and answers. v1 needed a 65-line
+transcript builder for this; this app needs none, because replaying a server-held
+conversation is every such app's problem, not Tasklet's.
 
 The store holds an opaque string, so one backend serves any agent framework; this kit
 converts at the edge with `ModelMessagesTypeAdapter`.

@@ -1,15 +1,7 @@
 from collections.abc import AsyncIterator, Sequence
 
-from ag_ui.core import (
-    Event,
-    EventType,
-    MessagesSnapshotEvent,
-    RunAgentInput,
-    StateSnapshotEvent,
-)
-from pydantic_ai import ModelMessagesTypeAdapter
+from ag_ui.core import Event, EventType, RunAgentInput, StateSnapshotEvent
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
-from pydantic_ai.ui.ag_ui import AGUIAdapter
 
 from app import db
 from app.assistant.agent import AgentDeps, tasklet_agent
@@ -70,35 +62,12 @@ class TaskletTopic(PydanticAIAgUiTopic):
             snapshot={"tasks": [task.model_dump() for task in tasks]},
         )
 
-    async def stored_messages(self) -> list[ModelMessage]:
-        conversation = await self.conversation_store.load(self.thread_id)
-        if not conversation:
-            return []
-        return ModelMessagesTypeAdapter.validate_json(conversation)
-
-    async def transcript(self) -> MessagesSnapshotEvent | None:
-        """The conversation so far, as AG-UI's own messages.
-
-        The paper trail, without a replay protocol of our own: the adapter that
-        writes the live stream also knows how to dump stored messages into it.
-        """
-        messages = await self.stored_messages()
-        if not messages:
-            return None
-        return MessagesSnapshotEvent(
-            type=EventType.MESSAGES_SNAPSHOT,
-            messages=AGUIAdapter.dump_messages(messages),
-        )
-
-    async def on_subscribe(self) -> None:
-        # Transcript and state first: a client joining mid-run applies the replayed
-        # run on top of a conversation and task list that are already current.
-        transcript = await self.transcript()
-        if transcript is not None:
-            await self.send_run_event(transcript, seq=None)
+    async def send_initial_state(self) -> None:
+        # The kit sends the transcript; the task list and chips are ours. All of it
+        # lands before the run in flight is replayed.
+        await super().send_initial_state()
         await self.send_run_event(await self.task_state(), seq=None)
         await self.send_suggestions()
-        await super().on_subscribe()
 
     async def send_suggestions(self) -> None:
         prompts = await db.load_suggestions(self.thread_id)
@@ -121,7 +90,7 @@ class TaskletTopic(PydanticAIAgUiTopic):
             if event.type in (EventType.RUN_FINISHED, EventType.RUN_ERROR):
                 yield await self.task_state()
             if event.type == EventType.RUN_FINISHED and not is_paused(event):
-                prompts = await follow_ups(await self.stored_messages())
+                prompts = await follow_ups(await self.load_history())
                 if prompts:
                     await db.save_suggestions(self.thread_id, prompts)
                     yield suggestions_event(prompts)
