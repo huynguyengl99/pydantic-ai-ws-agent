@@ -87,4 +87,4 @@ def build_agent(model: Model | str | None = None) -> Agent[AgentDeps, AgentOutpu
     return agent
 
 
-agent = build_agent()
+tasklet_agent = build_agent()

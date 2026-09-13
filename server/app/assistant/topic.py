@@ -12,7 +12,7 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 
 from app import db
-from app.assistant.agent import AgentDeps, agent
+from app.assistant.agent import AgentDeps, tasklet_agent
 from app.assistant.store import SqliteConversationStore
 from app.assistant.suggestions import follow_ups, suggestions_event
 from app.ws_kits.pydantic_ai_ag_ui import PydanticAIAgUiTopic
@@ -52,7 +52,7 @@ def is_paused(event: Event) -> bool:
 class TaskletTopic(PydanticAIAgUiTopic):
     """Tasklet over AG-UI, one thread per conversation."""
 
-    agent = agent
+    agent = tasklet_agent
     conversation_store = SqliteConversationStore()
     channel_layer_alias = "agent"
 
