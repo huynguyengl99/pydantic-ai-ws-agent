@@ -5,7 +5,11 @@ FastAPI and [chanx](https://github.com/huynguyengl99/chanx), speaking the
 [AG-UI protocol](https://ag-ui.com) over a WebSocket — plus a React client built on
 AG-UI's own published types.
 
-![Tasklet — live tool calls, a destructive tool paused for approval, and the per-conversation task list](assets/image.png)
+![Two browser tabs on one conversation: the left asks to delete a task, the run pauses for approval, and the right tab approves it](assets/two-tabs-approve.gif)
+
+*Two tabs, one run. The left tab asks; the run pauses on a destructive tool; the
+right tab — which never typed anything — approves it, and both tabs watch the run
+finish.*
 
 > **Looking for the version from the blog post?** That one invented its own typed
 > protocol and generated TypeScript from an AsyncAPI schema. It is tagged
