@@ -30,7 +30,9 @@ The demo agent ("Tasklet") manages a task list and shows:
   resumed approval works with `"messages": []`
 - **Every tab on one run** — runs broadcast to a per-thread channel-layer group, each
   event carrying a sequence number, and a tab that connects mid-run is replayed the run
-  so far before it sees anything live. Refresh mid-answer and it keeps going
+  so far before it sees anything live. Refresh mid-answer and it keeps going. The run
+  opens by echoing the prompt as `role: "user"` text events, so a tab that did not send
+  it still shows the question rather than an answer to nothing
 - **Shared state** — the task list travels as `STATE_SNAPSHOT`, sent on connect and
   again with every run, including runs that fail part-way through
 - **A real paper trail** — reloading replays the conversation as `MESSAGES_SNAPSHOT`:
