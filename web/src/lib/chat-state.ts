@@ -156,7 +156,18 @@ export function transcriptItems(messages: Message[]): ChatItem[] {
 function applyEvent(state: ChatState, event: BaseEvent): ChatState {
   switch (event.type) {
     case "RUN_STARTED":
-      return { ...state, running: true, suggestions: [] };
+      // A run starting while a card is unresolved means another tab answered
+      // the interrupt: this one would stay blocked on it otherwise.
+      return {
+        ...state,
+        running: true,
+        suggestions: [],
+        items: state.items.map((item) =>
+          item.kind === "approval" && item.resolved === null
+            ? { ...item, resolved: "remote" }
+            : item,
+        ),
+      };
 
     case "TEXT_MESSAGE_START":
       return state;

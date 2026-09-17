@@ -78,6 +78,37 @@ test("both tabs on a conversation follow the same run", async ({ browser }) => {
   await context.close();
 });
 
+test("approving in one tab releases the other", async ({ browser }) => {
+  const context = await browser.newContext();
+  const first = await context.newPage();
+  const second = await context.newPage();
+
+  await open(first, "e2e-remote-approval");
+  await open(second, "e2e-remote-approval");
+
+  await ask(first, "add a task");
+  await expect(first.locator(".task-items li")).toHaveCount(1);
+
+  await ask(first, "delete the first task");
+  await second
+    .locator(".approval-card")
+    .getByRole("button", { name: "Approve" })
+    .click();
+
+  // The tab that asked never clicked, so it can only learn the verdict from
+  // the resumed run — and until it does, its composer stays blocked.
+  await expect(first.locator(".approval-verdict")).toContainText(
+    "Resolved from another session",
+  );
+  await expect(first.getByRole("textbox")).toHaveAttribute(
+    "placeholder",
+    /Ask Tasklet/,
+  );
+  await expect(first.locator(".task-empty")).toBeVisible();
+
+  await context.close();
+});
+
 test("a tab joining mid-run is replayed from the start", async ({
   browser,
 }) => {
