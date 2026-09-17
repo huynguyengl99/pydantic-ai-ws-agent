@@ -1,6 +1,15 @@
 from collections.abc import AsyncIterator, Sequence
 
-from ag_ui.core import Event, EventType, RunAgentInput, StateSnapshotEvent
+from ag_ui.core import (
+    Event,
+    EventType,
+    RunAgentInput,
+    StateSnapshotEvent,
+    TextMessageContentEvent,
+    TextMessageEndEvent,
+    TextMessageStartEvent,
+    UserMessage,
+)
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 
 from app import db
@@ -33,6 +42,39 @@ def derive_title(messages: Sequence[ModelMessage]) -> str | None:
             case _:
                 pass
     return None
+
+
+def prompt_echo(run_input: RunAgentInput) -> list[Event]:
+    """The run's prompt as AG-UI events, so every tab renders it the same way.
+
+    Nothing else puts the user's turn on the wire: the run carries only what the
+    agent produces, which would leave a second tab showing an answer to a
+    question it never saw. `messages` holds just the new turn, and is empty when
+    a resumed approval re-enters the run.
+    """
+    events: list[Event] = []
+    for message in run_input.messages:
+        match message:
+            case UserMessage(id=message_id, content=str() as text) if text:
+                events += [
+                    TextMessageStartEvent(
+                        type=EventType.TEXT_MESSAGE_START,
+                        message_id=message_id,
+                        role="user",
+                    ),
+                    TextMessageContentEvent(
+                        type=EventType.TEXT_MESSAGE_CONTENT,
+                        message_id=message_id,
+                        delta=text,
+                    ),
+                    TextMessageEndEvent(
+                        type=EventType.TEXT_MESSAGE_END,
+                        message_id=message_id,
+                    ),
+                ]
+            case _:
+                pass
+    return events
 
 
 def is_paused(event: Event) -> bool:
@@ -95,3 +137,8 @@ class TaskletTopic(PydanticAIAgUiTopic):
                     await db.save_suggestions(self.thread_id, prompts)
                     yield suggestions_event(prompts)
             yield event
+            # After RUN_STARTED, not before it: a run's events are numbered from
+            # there, and a client resynchronises on it and drops what precedes.
+            if event.type == EventType.RUN_STARTED:
+                for echo in prompt_echo(run_input):
+                    yield echo

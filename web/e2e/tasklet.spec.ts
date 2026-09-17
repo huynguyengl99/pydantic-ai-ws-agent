@@ -73,6 +73,9 @@ test("both tabs on a conversation follow the same run", async ({ browser }) => {
   await ask(first, "add a task");
 
   // The second tab never sent anything, yet sees the run and the new state.
+  // The prompt included: the server echoes it, so both tabs show the question
+  // rather than only the tab that asked it.
+  await expect(second.locator(".messages")).toContainText("add a task");
   await expect(second.locator(".tool-card")).toContainText("add_task");
   await expect(second.locator(".task-items li")).toHaveText(/Ship v2/);
   await expect(first.locator(".task-items li")).toHaveText(/Ship v2/);

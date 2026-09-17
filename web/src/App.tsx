@@ -87,7 +87,7 @@ export default function App() {
     runAgent({
       messages: [{ id: crypto.randomUUID(), role: "user", content: text }],
     });
-    dispatch({ type: "sent_prompt", text });
+    dispatch({ type: "sent_prompt" });
     setDraft("");
   };
 

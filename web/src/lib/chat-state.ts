@@ -54,7 +54,7 @@ export const initialState: ChatState = {
 
 export type ChatAction =
   | { type: "event"; event: BaseEvent }
-  | { type: "sent_prompt"; text: string }
+  | { type: "sent_prompt" }
   | { type: "resolved_approval"; id: string; approved: boolean }
   | { type: "dismiss_toast"; id: string }
   | { type: "reset" };
@@ -69,12 +69,16 @@ function field<T>(event: BaseEvent, name: string): T {
 
 function appendDelta(items: ChatItem[], id: string, delta: string): ChatItem[] {
   const index = items.findIndex(
-    (item) => item.kind === "assistant" && item.id === id,
+    (item) =>
+      (item.kind === "assistant" || item.kind === "user") && item.id === id,
   );
   if (index === -1) {
     return [...items, { kind: "assistant", id, text: delta, streaming: true }];
   }
-  const existing = items[index] as Extract<ChatItem, { kind: "assistant" }>;
+  const existing = items[index] as Extract<
+    ChatItem,
+    { kind: "assistant" | "user" }
+  >;
   const updated: ChatItem = { ...existing, text: existing.text + delta };
   return [...items.slice(0, index), updated, ...items.slice(index + 1)];
 }
@@ -169,8 +173,19 @@ function applyEvent(state: ChatState, event: BaseEvent): ChatState {
         ),
       };
 
-    case "TEXT_MESSAGE_START":
-      return state;
+    case "TEXT_MESSAGE_START": {
+      // The server echoes the prompt so every tab renders it from the run
+      // rather than from having been the one that sent it.
+      if (field<string>(event, "role") !== "user") return state;
+      const id = field<string>(event, "messageId");
+      if (state.items.some((item) => item.kind === "user" && item.id === id)) {
+        return state;
+      }
+      return {
+        ...state,
+        items: [...state.items, { kind: "user", id, text: "" }],
+      };
+    }
 
     case "TEXT_MESSAGE_CONTENT":
       return {
@@ -318,13 +333,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         toasts: state.toasts.filter((toast) => toast.id !== action.id),
       };
     case "sent_prompt":
-      // AG-UI never echoes the prompt back, so the bubble is ours to add. A
-      // second tab therefore will not show it until the answer arrives.
-      return {
-        ...state,
-        running: true,
-        items: [...state.items, { kind: "user", id: uid(), text: action.text }],
-      };
+      // The bubble arrives with the run, the same as it does for every other
+      // tab, so there is nothing to add here.
+      return { ...state, running: true };
     case "resolved_approval":
       return {
         ...state,

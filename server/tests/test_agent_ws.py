@@ -249,6 +249,55 @@ async def test_every_tab_follows_the_same_run(use_flow: UseFlow) -> None:
     assert [e["seq"] for e in from_first] == [e["seq"] for e in from_second]
 
 
+def user_echo(events: list[dict[str, Any]]) -> list[str]:
+    """The prompts the run put on the wire, in order."""
+    return [
+        event["payload"]["delta"]
+        for event in events
+        if event["payload"]["type"] == "TEXT_MESSAGE_CONTENT"
+        and event["payload"].get("messageId", "").startswith("m")
+    ]
+
+
+async def test_the_prompt_is_echoed_to_every_tab(use_flow: UseFlow) -> None:
+    """Nothing else carries the user's turn, so a tab that did not send it would
+    show an answer to a question it never saw."""
+    use_flow(add_task_flow)
+
+    async with communicator() as first, communicator() as second:
+        await subscribe(first)
+        await subscribe(second)
+
+        await send_run(first)
+        from_first = await drain_run(first)
+        from_second = await drain_run(second)
+
+    assert user_echo(from_first) == ["add a task"]
+    assert user_echo(from_second) == ["add a task"]
+    # A run is numbered from RUN_STARTED, and a client resynchronises on it, so
+    # an echo sent before it is dropped as stale on every run but the first.
+    types = types_of(from_first)
+    assert types.index("RUN_STARTED") < types.index("TEXT_MESSAGE_START")
+
+
+async def test_a_later_prompt_is_echoed_too(use_flow: UseFlow) -> None:
+    use_flow(add_task_flow)
+
+    async with communicator() as comm:
+        await subscribe(comm)
+        await send_run(comm)
+        await drain_run(comm)
+
+        await send_run(
+            comm,
+            runId="run-2",
+            messages=[{"id": "m2", "role": "user", "content": "and another"}],
+        )
+        second = await drain_run(comm)
+
+    assert user_echo(second) == ["and another"]
+
+
 async def test_the_conversation_is_kept_server_side(use_flow: UseFlow) -> None:
     """A second run sends no history, so continuing proves the server holds it."""
     use_flow(add_task_flow)
