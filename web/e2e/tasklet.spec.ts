@@ -23,6 +23,8 @@ test("a run streams its tool call, answer and task list", async ({ page }) => {
 
   await expect(page.locator(".tool-card")).toContainText("add_task");
   await expect(page.locator(".tool-card.tool-done")).toBeVisible();
+  // Results arrive already serialised, so re-encoding them would show escapes.
+  await expect(page.locator(".tool-result")).toContainText('"title":"Ship v2"');
   await expect(page.locator(".messages")).toContainText("done.");
   await expect(page.locator(".task-items li")).toHaveText(/Ship v2/);
   await expect(page.locator(".task-count")).toContainText("1 total");

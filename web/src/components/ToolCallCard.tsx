@@ -7,6 +7,17 @@ const STATUS_LABEL = {
   denied: "denied",
 } as const;
 
+function formatResult(result: unknown): string {
+  // AG-UI carries tool results as an already-serialised string, so stringifying
+  // one again would show it escaped and quoted.
+  if (typeof result !== "string") return JSON.stringify(result);
+  try {
+    return JSON.stringify(JSON.parse(result));
+  } catch {
+    return result;
+  }
+}
+
 export function ToolCallCard({
   item,
 }: {
@@ -30,7 +41,7 @@ export function ToolCallCard({
       </div>
       {call.args && <pre className="tool-args">{call.args}</pre>}
       {result !== undefined && (
-        <pre className="tool-result">→ {JSON.stringify(result)}</pre>
+        <pre className="tool-result">→ {formatResult(result)}</pre>
       )}
     </div>
   );
