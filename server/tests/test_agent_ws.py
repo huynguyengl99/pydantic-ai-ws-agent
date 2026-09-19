@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from typing import Any, TypeVar
 
@@ -247,6 +248,65 @@ async def test_every_tab_follows_the_same_run(use_flow: UseFlow) -> None:
 
     assert types_of(from_first) == types_of(from_second)
     assert [e["seq"] for e in from_first] == [e["seq"] for e in from_second]
+
+
+async def receive_until(
+    comm: WebsocketCommunicator, matches: Callable[[dict[str, Any]], bool]
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """The first frame that matches, plus everything read on the way to it."""
+    seen: list[dict[str, Any]] = []
+    for _ in range(40):
+        message: dict[str, Any] = await comm.receive_json_from(5)
+        if matches(message):
+            return message, seen
+        seen.append(message)
+    raise AssertionError(f"no match; saw {types_of(seen)}")
+
+
+async def test_a_tab_sending_into_a_busy_conversation_gets_a_toast(
+    use_flow: UseFlow,
+) -> None:
+    """Both tabs sending at once. The second is turned away with a notification, not
+    with the kit's RUN_ERROR, which would tell a tab already watching the run in
+    flight that it had failed and hand the composer back mid-answer."""
+    released = asyncio.Event()
+
+    async def slow_flow(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | DeltaToolCalls]:
+        yield "Thinking"
+        await released.wait()
+        yield " done."
+
+    use_flow(slow_flow)
+
+    async with communicator() as first, communicator() as second:
+        await subscribe(first)
+        await subscribe(second)
+
+        await send_run(first)
+        started = await first.receive_json_from(5)
+        assert started["payload"]["type"] == "RUN_STARTED"
+
+        await send_run(second, runId="run-2")
+        refusal, before = await receive_until(
+            second, lambda m: m["payload"]["type"] == "CUSTOM"
+        )
+
+        assert refusal["payload"]["name"] == "notification"
+        assert "Another tab" in refusal["payload"]["value"]["body"]
+        # Outside the run's sequence, so it cannot be mistaken for part of it.
+        assert "seq" not in refusal
+        # Nothing told this tab the run it is watching had failed.
+        assert "RUN_ERROR" not in types_of(before)
+
+        released.set()
+
+        # The refused run never disturbed the one in flight.
+        finished, _ = await receive_until(
+            first, lambda m: m["payload"]["type"] == "RUN_FINISHED"
+        )
+        assert finished["payload"]["type"] == "RUN_FINISHED"
 
 
 def user_echo(events: list[dict[str, Any]]) -> list[str]:

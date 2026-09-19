@@ -14,6 +14,7 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 
 from app import db
 from app.assistant.agent import AgentDeps, tasklet_agent
+from app.assistant.notify import notification_event
 from app.assistant.store import SqliteConversationStore
 from app.assistant.suggestions import follow_ups, suggestions_event
 from app.ws_kits.pydantic_ai_ag_ui import PydanticAIAgUiTopic
@@ -110,6 +111,20 @@ class TaskletTopic(PydanticAIAgUiTopic):
         await super().send_initial_state()
         await self.send_run_event(await self.task_state(), seq=None)
         await self.send_suggestions()
+
+    async def on_run_refused(
+        self, run_input: RunAgentInput, active_run_id: str
+    ) -> None:
+        # A toast rather than the kit's RUN_ERROR: this tab is already watching the
+        # run that holds the thread, and an error would tell it that run had failed
+        # and hand the composer back mid-answer.
+        await self.send_run_event(
+            notification_event(
+                "Already answering",
+                "Another tab is running this conversation. Wait for it to finish.",
+            ),
+            seq=None,
+        )
 
     async def send_suggestions(self) -> None:
         prompts = await db.load_suggestions(self.thread_id)
