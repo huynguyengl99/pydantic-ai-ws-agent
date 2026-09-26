@@ -12,3 +12,4 @@ dist/
 web/test-results/
 web/playwright-report/
 server/e2e.db
+web/asyncapi.json

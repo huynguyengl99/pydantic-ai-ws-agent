@@ -5,3 +5,4 @@ pnpm-lock.yaml
 test-results/
 playwright-report/
 dist/
+asyncapi.json

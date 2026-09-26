@@ -1,31 +1,10 @@
 import type { BaseEvent, RunAgentInput } from "@ag-ui/core";
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import useWebSocket, { ReadyState } from "react-use-websocket";
+import { useTopic } from "@chanx-js/client/react";
+import { useCallback, useMemo } from "react";
+
+import { agent } from "../generated";
 
 export type SocketStatus = "connecting" | "open" | "closed";
-
-export type AgentSocketUrl = `${"ws" | "wss"}://${string}/ws/agent`;
-
-/** chanx routing metadata, carried beside the message on the same frame. */
-interface Envelope {
-  version: 1;
-  topic: string;
-  ref?: string;
-  seq?: number;
-}
-
-type Frame = Envelope & { action: string; payload?: unknown };
-
-export const threadTopic = (conversation: string) =>
-  `agui:thread:${conversation}`;
-
-function isAgUiEvent(frame: unknown): frame is Frame & { payload: BaseEvent } {
-  return (
-    typeof frame === "object" &&
-    frame !== null &&
-    (frame as Frame).action === "ag_ui_event"
-  );
-}
 
 /**
  * Apply run events in sequence order.
@@ -65,57 +44,33 @@ function createOrderer() {
 }
 
 export function useAgentSocket(
-  url: AgentSocketUrl,
   conversation: string,
   onEvent: (event: BaseEvent) => void,
 ): {
   status: SocketStatus;
-  runAgent: (input: Partial<RunAgentInput> & { messages?: unknown[] }) => void;
+  runAgent: (input: Partial<RunAgentInput>) => void;
 } {
-  const topic = useMemo(() => threadTopic(conversation), [conversation]);
-
-  const onEventRef = useRef(onEvent);
-  useEffect(() => {
-    onEventRef.current = onEvent;
-  }, [onEvent]);
-
   // A new conversation is a new stream, so it starts numbering again.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the topic
-  const orderer = useMemo(() => createOrderer(), [topic]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the conversation
+  const orderer = useMemo(() => createOrderer(), [conversation]);
 
-  const { sendJsonMessage, lastJsonMessage, readyState } = useWebSocket<Frame>(
-    url,
+  // Subscribing is what starts the flow: the topic replies with the task state,
+  // then with the run in flight, if any.
+  const { status, send } = useTopic(
+    agent,
+    agent.topics.taskletTopic.with({ thread_id: conversation }),
     {
-      shouldReconnect: () => true,
-      reconnectAttempts: 10,
-      reconnectInterval: 3000,
-      filter: (event) => {
-        try {
-          return isAgUiEvent(JSON.parse(event.data as string));
-        } catch {
-          return false;
-        }
+      buffer: "none",
+      on: {
+        ag_ui_event: (message, { seq }) =>
+          orderer(message.payload, seq, onEvent),
       },
     },
   );
 
-  // Subscribing is what starts the flow: the topic replies with the task state,
-  // then with the run in flight, if any.
-  useEffect(() => {
-    if (readyState !== ReadyState.OPEN) return;
-    sendJsonMessage({ version: 1, topic, ref: "1", action: "subscribe" });
-  }, [readyState, topic, sendJsonMessage]);
-
-  useEffect(() => {
-    if (lastJsonMessage === null || !isAgUiEvent(lastJsonMessage)) return;
-    orderer(lastJsonMessage.payload, lastJsonMessage.seq, onEventRef.current);
-  }, [lastJsonMessage, orderer]);
-
   const runAgent = useCallback(
-    (input: Partial<RunAgentInput> & { messages?: unknown[] }) => {
-      sendJsonMessage({
-        version: 1,
-        topic,
+    (input: Partial<RunAgentInput>) => {
+      send({
         action: "ag_ui_run",
         payload: {
           threadId: conversation,
@@ -129,15 +84,11 @@ export function useAgentSocket(
         },
       });
     },
-    [conversation, topic, sendJsonMessage],
+    [conversation, send],
   );
 
-  const status: SocketStatus =
-    readyState === ReadyState.OPEN
-      ? "open"
-      : readyState === ReadyState.CONNECTING
-        ? "connecting"
-        : "closed";
-
-  return { status, runAgent };
+  return {
+    status: status === "reconnecting" ? "connecting" : status,
+    runAgent,
+  };
 }

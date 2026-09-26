@@ -20,11 +20,9 @@ import {
   deleteConversation,
   fetchConversations,
 } from "./lib/conversations";
+import { SERVER } from "./lib/server";
 import { useAgentSocket } from "./lib/ws-client";
 import type { BaseEvent } from "@ag-ui/core";
-
-const SERVER =
-  (import.meta.env.VITE_SERVER_URL as string | undefined) ?? "localhost:8000";
 
 function conversationId(): string {
   const existing = localStorage.getItem("tasklet-conversation");
@@ -57,13 +55,9 @@ export default function App() {
     [refreshConversations],
   );
 
-  const { status, runAgent } = useAgentSocket(
-    `ws://${SERVER}/ws/agent`,
-    conversation,
-    onEvent,
-  );
+  const { status, runAgent } = useAgentSocket(conversation, onEvent);
 
-  // Switching conversations reconnects (the url changes); reset local state.
+  // Switching conversations joins another topic; reset local state.
   useEffect(() => {
     dispatch({ type: "reset" });
     refreshConversations();
